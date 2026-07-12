@@ -170,13 +170,15 @@ object YtDlpManager {
         val custom = customCobaltUrl?.trim()
         if (!custom.isNullOrEmpty()) {
             val formatted = if (custom.endsWith("/api/json")) custom else {
-                if (custom.endsWith("/")) "${custom}api/json" else "${custom}/api/json"
+                if (custom.endsWith("/")) custom else "$custom/"
             }
             cobaltUrls.add(formatted)
         }
         
-        // Add primary official Cobalt URL
-        cobaltUrls.add("https://api.cobalt.tools/api/json")
+        // Add verified public Cobalt instances (root-path v10+)
+        cobaltUrls.add("https://rue-cobalt.xenon.zone/")
+        cobaltUrls.add("https://dog.kittycat.boo/")
+        cobaltUrls.add("https://cobaltapi.cjs.nz/")
 
         var lastError = ""
         for (apiUrl in cobaltUrls) {
@@ -184,7 +186,6 @@ object YtDlpManager {
                 val jsonObject = JSONObject().apply {
                     put("url", url)
                     put("videoQuality", quality)
-                    put("isAudioOnly", isAudioOnly)
                     put("downloadMode", if (isAudioOnly) "audio" else "auto")
                 }
 
@@ -202,7 +203,7 @@ object YtDlpManager {
                         val responseJson = JSONObject(responseString)
                         val status = responseJson.optString("status", "")
                         
-                        if (status == "success" || status == "stream" || status == "redirect") {
+                        if (status == "success" || status == "stream" || status == "redirect" || status == "tunnel") {
                             val streamUrl = responseJson.getString("url")
                             val filename = responseJson.optString("filename", "video.mp4")
                             return Pair(streamUrl, filename)

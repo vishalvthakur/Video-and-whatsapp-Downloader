@@ -39,6 +39,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.documentfile.provider.DocumentFile
 import coil.compose.AsyncImage
 import com.example.media.MediaStoreManager
+import com.example.presentation.components.VideoPlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -330,7 +331,7 @@ fun StatusSaverTab(
     
     var statusesList by remember { mutableStateOf<List<StatusItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
-    var previewImageUri by remember { mutableStateOf<Uri?>(null) }
+    var previewItem by remember { mutableStateOf<StatusItem?>(null) }
     
     // SAF Folder Picker Launcher
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -587,10 +588,10 @@ fun StatusSaverTab(
                                 onStatusSelected(item)
                             },
                             onPlay = {
-                                onPlayVideo(item.uri.toString(), item.name)
+                                previewItem = item
                             },
                             onPreviewImage = {
-                                previewImageUri = item.uri
+                                previewItem = item
                             },
                             onSave = {
                                 coroutineScope.launch {
@@ -626,36 +627,36 @@ fun StatusSaverTab(
         }
     }
     
-    // Preview Dialog for image status
-    if (previewImageUri != null) {
-        ImagePreviewDialog(
-            uri = previewImageUri!!,
-            onDismiss = { previewImageUri = null },
+    // Unified Preview Dialog for photo and video status
+    if (previewItem != null) {
+        MediaPreviewDialog(
+            item = previewItem!!,
+            onDismiss = { previewItem = null },
             onSave = {
                 coroutineScope.launch {
                     val savedUri = MediaStoreManager.saveMediaFromUri(
                         context = context,
-                        srcUri = previewImageUri!!,
-                        title = "WhatsApp_Status_" + System.currentTimeMillis().toString().takeLast(6),
-                        isVideo = false
+                        srcUri = previewItem!!.uri,
+                        title = previewItem!!.name.substringBeforeLast("."),
+                        isVideo = previewItem!!.isVideo
                     )
                     if (savedUri != null) {
-                        Toast.makeText(context, "Saved to Gallery!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Successfully Downloaded Status to Gallery!", Toast.LENGTH_LONG).show()
                     } else {
-                        Toast.makeText(context, "Failed to save image", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Failed to download status", Toast.LENGTH_SHORT).show()
                     }
                 }
             },
             onShare = {
                 try {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "image/*"
-                        putExtra(Intent.EXTRA_STREAM, previewImageUri!!)
+                        type = if (previewItem!!.isVideo) "video/mp4" else "image/*"
+                        putExtra(Intent.EXTRA_STREAM, previewItem!!.uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
+                    context.startActivity(Intent.createChooser(shareIntent, "Share Status"))
                 } catch (e: Exception) {
-                    Toast.makeText(context, "Could not share image", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Could not share status", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -708,6 +709,33 @@ fun StatusGridCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
+                
+                // Preview badge overlay
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Visibility,
+                            contentDescription = "Preview",
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "PREVIEW",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 
                 // Play Button overlay for video
                 if (item.isVideo) {
@@ -1031,8 +1059,8 @@ fun ProfileDownloaderTab(
 }
 
 @Composable
-fun ImagePreviewDialog(
-    uri: Uri,
+fun MediaPreviewDialog(
+    item: StatusItem,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
     onShare: () -> Unit
@@ -1046,13 +1074,20 @@ fun ImagePreviewDialog(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            // Fullscreen Image view
-            AsyncImage(
-                model = uri,
-                contentDescription = "Fullscreen preview",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
+            // Fullscreen preview
+            if (item.isVideo) {
+                VideoPlayerView(
+                    videoUri = item.uri.toString(),
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = "Fullscreen preview",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             
             // Top Controls overlay
             Row(
@@ -1087,6 +1122,86 @@ fun ImagePreviewDialog(
                     ) {
                         Icon(imageVector = Icons.Default.Download, contentDescription = "Save", tint = Color.White)
                     }
+                }
+            }
+            
+            // Bottom Info Overlay
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
+                        )
+                    )
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = item.name,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                val sizeStr = remember(item.size) {
+                    val kb = item.size / 1024.0
+                    val mb = kb / 1024.0
+                    if (mb >= 1) String.format("%.2f MB", mb) else String.format("%.1f KB", kb)
+                }
+                
+                val dateStr = remember(item.lastModified) {
+                    val sdf = java.text.SimpleDateFormat("MMM dd, yyyy - hh:mm a", java.util.Locale.getDefault())
+                    sdf.format(java.util.Date(item.lastModified))
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (item.isVideo) "Video • $sizeStr" else "Photo • $sizeStr",
+                        color = Color.LightGray,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = dateStr,
+                        color = Color.LightGray,
+                        fontSize = 13.sp
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = {
+                        onSave()
+                        onDismiss()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF128C7E),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Download Status",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }
