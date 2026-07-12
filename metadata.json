@@ -1,0 +1,6 @@
+{
+  "name": "Video Downloader",
+  "description": "A powerful, offline-ready Android video downloader with metadata extraction, quality formats selection, live progress tracking, download history, and integrated local media player.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
