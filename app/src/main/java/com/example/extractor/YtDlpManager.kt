@@ -271,43 +271,56 @@ object YtDlpManager {
 
                     client.newCall(request).execute().use { response ->
                         val responseString = response.body?.string() ?: ""
-                        if (responseString.isNotEmpty()) {
-                            val responseJson = JSONObject(responseString)
-                            val status = responseJson.optString("status", "")
-                            
-                            if (response.isSuccessful && (status == "success" || status == "stream" || status == "redirect" || status == "tunnel" || responseJson.has("url"))) {
-                                val streamUrl = responseJson.optString("url", "")
-                                if (streamUrl.isNotEmpty()) {
-                                    val filename = responseJson.optString("filename", "video.mp4")
-                                    return Pair(streamUrl, filename)
+                        val trimmedResponse = responseString.trim()
+                        if (trimmedResponse.isNotEmpty()) {
+                            if (trimmedResponse.startsWith("<!DOCTYPE") || trimmedResponse.startsWith("<html") || trimmedResponse.startsWith("<HTML")) {
+                                if (!custom.isNullOrEmpty() && requestUrl.contains(custom)) {
+                                    lastError = "Your custom extraction server ($custom) returned an HTML web page instead of JSON API data. Please verify your custom URL is correct (e.g., includes the port like :9000 or ends with '/api/json' if required), and is not the front-end web UI."
+                                } else {
+                                    lastError = "The public extraction server ($requestUrl) returned an HTML error page. This usually means the server is blocked by YouTube's bot detection, rate-limited, or protected by a Cloudflare challenge."
                                 }
-                            } else if (response.isSuccessful && status == "picker") {
-                                val pickerArray = responseJson.optJSONArray("picker")
-                                if (pickerArray != null && pickerArray.length() > 0) {
-                                    val item = pickerArray.getJSONObject(0)
-                                    val streamUrl = item.optString("url", "")
+                                Log.w(TAG, "Server $requestUrl returned HTML: ${trimmedResponse.take(200)}")
+                            } else if (!trimmedResponse.startsWith("{") && !trimmedResponse.startsWith("[")) {
+                                lastError = "Server returned an invalid non-JSON response (HTTP ${response.code})."
+                                Log.w(TAG, "Server $requestUrl returned non-JSON: ${trimmedResponse.take(200)}")
+                            } else {
+                                val responseJson = JSONObject(responseString)
+                                val status = responseJson.optString("status", "")
+                                
+                                if (response.isSuccessful && (status == "success" || status == "stream" || status == "redirect" || status == "tunnel" || responseJson.has("url"))) {
+                                    val streamUrl = responseJson.optString("url", "")
                                     if (streamUrl.isNotEmpty()) {
                                         val filename = responseJson.optString("filename", "video.mp4")
                                         return Pair(streamUrl, filename)
                                     }
+                                } else if (response.isSuccessful && status == "picker") {
+                                    val pickerArray = responseJson.optJSONArray("picker")
+                                    if (pickerArray != null && pickerArray.length() > 0) {
+                                        val item = pickerArray.getJSONObject(0)
+                                        val streamUrl = item.optString("url", "")
+                                        if (streamUrl.isNotEmpty()) {
+                                            val filename = responseJson.optString("filename", "video.mp4")
+                                            return Pair(streamUrl, filename)
+                                        }
+                                    }
                                 }
-                            }
-                            
-                            // Extract detailed Cobalt API error code if unsuccessful or status is error
-                            val errorObj = responseJson.optJSONObject("error")
-                            val errorCode = errorObj?.optString("code") ?: responseJson.optString("error")
-                            if (!errorCode.isNullOrEmpty()) {
-                                lastError = errorCode
-                            } else {
-                                val text = responseJson.optString("text")
-                                if (text.isNotEmpty()) {
-                                    lastError = text
+                                
+                                // Extract detailed Cobalt API error code if unsuccessful or status is error
+                                val errorObj = responseJson.optJSONObject("error")
+                                val errorCode = errorObj?.optString("code") ?: responseJson.optString("error")
+                                if (!errorCode.isNullOrEmpty()) {
+                                    lastError = errorCode
                                 } else {
-                                    lastError = "HTTP ${response.code}: ${response.message}"
+                                    val text = responseJson.optString("text")
+                                    if (text.isNotEmpty()) {
+                                        lastError = text
+                                    } else {
+                                        lastError = "HTTP ${response.code}: ${response.message}"
+                                    }
                                 }
                             }
                         } else {
-                            lastError = "HTTP ${response.code}: ${response.message}"
+                            lastError = "Empty response (HTTP ${response.code}: ${response.message})"
                         }
                     }
                 } catch (e: Exception) {

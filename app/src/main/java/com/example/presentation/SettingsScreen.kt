@@ -416,7 +416,8 @@ fun YouTubeCookieExtractorDialog(
     onCookieExtracted: (String) -> Unit
 ) {
     var extractedCookie by remember { mutableStateOf("") }
-    var pageUrl by remember { mutableStateOf("https://m.youtube.com") }
+    var pageUrl by remember { mutableStateOf("https://www.youtube.com") }
+    var isLoading by remember { mutableStateOf(true) }
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
@@ -472,27 +473,60 @@ fun YouTubeCookieExtractorDialog(
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
                                     databaseEnabled = true
-                                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                                    // Bypass Google login blocks inside WebViews by using a standard Desktop Chrome User-Agent
+                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                                 }
                                 val cookieManager = android.webkit.CookieManager.getInstance()
                                 cookieManager.setAcceptCookie(true)
                                 cookieManager.setAcceptThirdPartyCookies(this, true)
 
                                 webViewClient = object : android.webkit.WebViewClient() {
+                                    override fun onPageStarted(view: android.webkit.WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                        super.onPageStarted(view, url, favicon)
+                                        isLoading = true
+                                        android.util.Log.d("YouTubeLogin", "onPageStarted: $url")
+                                    }
+
                                     override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                                         super.onPageFinished(view, url)
+                                        isLoading = false
+                                        android.util.Log.d("YouTubeLogin", "onPageFinished: $url")
                                         url?.let { pageUrl = it }
                                         val cookies = cookieManager.getCookie("https://.youtube.com") ?: cookieManager.getCookie("https://www.youtube.com")
                                         if (!cookies.isNullOrEmpty()) {
                                             extractedCookie = cookies
                                         }
                                     }
+
+                                    override fun onReceivedError(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                                        super.onReceivedError(view, request, error)
+                                        isLoading = false
+                                        android.util.Log.e("YouTubeLogin", "WebView Error: ${error?.description} (${error?.errorCode})")
+                                    }
+
+                                    override fun onReceivedSslError(view: android.webkit.WebView?, handler: android.webkit.SslErrorHandler?, error: android.net.http.SslError?) {
+                                        android.util.Log.w("YouTubeLogin", "SSL Error: $error")
+                                        handler?.proceed()
+                                    }
                                 }
-                                loadUrl("https://m.youtube.com/login")
+                                // Direct YouTube service login URL via Google Accounts
+                                loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2F")
                             }
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    if (isLoading) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Color(0x80FFFFFF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(48.dp)
+                            )
+                        }
+                    }
                 }
 
                 // Footer controls
