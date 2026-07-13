@@ -675,7 +675,7 @@ fun HomeScreen(
         YouTubeCookieExtractorDialog(
             onDismiss = { showExtractorDialogAfterFailure = false },
             onCookieExtracted = { cookie ->
-                val sharedPrefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+                val sharedPrefs = context.getSharedPreferences("video_downloader_prefs", Context.MODE_PRIVATE)
                 sharedPrefs.edit().putString("custom_youtube_cookie", cookie).apply()
                 com.example.extractor.YtDlpManager.customYoutubeCookie = cookie
                 

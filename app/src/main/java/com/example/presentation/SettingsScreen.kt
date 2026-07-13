@@ -2,6 +2,7 @@ package com.example.presentation
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import android.content.Context
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.VpnKey
@@ -42,6 +44,8 @@ fun SettingsScreen(
     var customUrl by remember { mutableStateOf(sharedPrefs.getString("custom_cobalt_url", "") ?: "") }
     var customCookie by remember { mutableStateOf(sharedPrefs.getString("custom_youtube_cookie", "") ?: "") }
     var showCookieExtractor by remember { mutableStateOf(false) }
+    var preferredFolder by remember { mutableStateOf(com.example.media.FileStorageUtility.getPreferredSaveFolder(context)) }
+    var showFolderSelectorDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -77,7 +81,10 @@ fun SettingsScreen(
                 ),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showFolderSelectorDialog = true }
+                    .testTag("save_location_card")
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -97,7 +104,7 @@ fun SettingsScreen(
                             fontSize = 16.sp
                         )
                         Text(
-                            text = "Movies/VideoDownloader/",
+                            text = if (preferredFolder == "Downloads") "Download/VideoDownloader/" else "Movies/VideoDownloader/",
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -411,6 +418,92 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showFolderSelectorDialog) {
+        AlertDialog(
+            onDismissRequest = { showFolderSelectorDialog = false },
+            title = { Text("Select Save Location", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Choose the public folder where your downloaded videos and audios should be saved:",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Surface(
+                        onClick = {
+                            preferredFolder = "Movies"
+                            com.example.media.FileStorageUtility.setPreferredSaveFolder(context, "Movies")
+                            showFolderSelectorDialog = false
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (preferredFolder == "Movies") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = (preferredFolder == "Movies"),
+                                onClick = {
+                                    preferredFolder = "Movies"
+                                    com.example.media.FileStorageUtility.setPreferredSaveFolder(context, "Movies")
+                                    showFolderSelectorDialog = false
+                                }
+                            )
+                            Column {
+                                Text("Movies Gallery", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Saved to Movies/VideoDownloader/ (Recommended for general gallery & video players)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            preferredFolder = "Downloads"
+                            com.example.media.FileStorageUtility.setPreferredSaveFolder(context, "Downloads")
+                            showFolderSelectorDialog = false
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (preferredFolder == "Downloads") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = (preferredFolder == "Downloads"),
+                                onClick = {
+                                    preferredFolder = "Downloads"
+                                    com.example.media.FileStorageUtility.setPreferredSaveFolder(context, "Downloads")
+                                    showFolderSelectorDialog = false
+                                }
+                            )
+                            Column {
+                                Text("Downloads Folder", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Saved to Download/VideoDownloader/ (Perfect for file manager access)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFolderSelectorDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -476,14 +569,26 @@ fun YouTubeCookieExtractorDialog(
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
                                     databaseEnabled = true
-                                    // Bypass Google login blocks inside WebViews by using a Windows Desktop Chrome User-Agent (which doesn't trigger Chromium JS API checks and is fully trusted)
-                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                                    // Bypass Google login blocks inside WebViews by using a trusted Chrome Mobile User-Agent and completely disabling X-Requested-With
+                                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                                }
+                                if (androidx.webkit.WebViewFeature.isFeatureSupported("REQUESTED_WITH_HEADER_CONTROL")) {
+                                    androidx.webkit.WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, emptySet())
                                 }
                                 val cookieManager = android.webkit.CookieManager.getInstance()
                                 cookieManager.setAcceptCookie(true)
                                 cookieManager.setAcceptThirdPartyCookies(this, true)
 
                                 webViewClient = object : android.webkit.WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                        return false
+                                    }
+
+                                    @Deprecated("Deprecated in Java")
+                                    override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, url: String?): Boolean {
+                                        return false
+                                    }
+
                                     override fun onPageStarted(view: android.webkit.WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                         super.onPageStarted(view, url, favicon)
                                         isLoading = true

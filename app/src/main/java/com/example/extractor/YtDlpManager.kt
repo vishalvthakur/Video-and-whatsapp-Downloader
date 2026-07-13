@@ -226,6 +226,10 @@ object YtDlpManager {
         cobaltUrls.add("https://co.wuk.sh/")
         cobaltUrls.add("https://api.cobalt.tools/")
         cobaltUrls.add("https://cobaltapi.cjs.nz/")
+        cobaltUrls.add("https://cobalt.lucasl.dev/")
+        cobaltUrls.add("https://cobalt.k6.vc/")
+        cobaltUrls.add("https://co.v9.sh/")
+        cobaltUrls.add("https://cobalt.populas.org/")
 
         var lastError = ""
         for (baseApiUrl in cobaltUrls) {
@@ -249,8 +253,13 @@ object YtDlpManager {
                         put("videoQuality", quality)
                         if (apiVersion == 10) {
                             put("downloadMode", if (isAudioOnly) "audio" else "auto")
+                            put("alwaysProxy", true) // Request Cobalt server to proxy/tunnel the download
+                            put("tunnelSource", true) // Fallback proxy parameter
+                            put("youtubeVideoCodec", "h264") // highly compatible h264
                         } else {
                             put("isAudioOnly", isAudioOnly)
+                            put("isTunnel", true) // Request Cobalt server to proxy/tunnel the download
+                            put("youtubeVideoCodec", "h264") // highly compatible h264
                         }
                     }
 

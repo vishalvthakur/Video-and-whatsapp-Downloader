@@ -83,53 +83,86 @@ object MediaDownloadManager {
 
             val finalLocalPath: String
             val mimeType: String
+            var actualHeightUsed = targetHeight
 
             if (isAudioOnly) {
                 // Audio-Only Download
                 mimeType = "audio/mpeg"
-                val audioTempPath = File(tempDir, "audio.tmp").absolutePath
+                val finalAudioFile = File(tempDir, "final_audio.mp3")
+                finalLocalPath = finalAudioFile.absolutePath
+                
                 _downloadState.value = DownloadState.Downloading(
                     DownloadProgress(0f, 0L, null, 0L, null),
                     "Downloading audio..."
                 )
 
-                val result = extractor.download(url, "audio", audioTempPath) { progress ->
+                val result = extractor.download(url, "audio", finalLocalPath) { progress ->
                     _downloadState.value = DownloadState.Downloading(progress, "Downloading Audio")
                     onServiceAction("UPDATE_PROGRESS", "${progress.percent.toInt()}%")
                 }
 
-                if (result is DownloadResult.Success) {
-                    val finalAudio = File(tempDir, "final_audio.mp3")
-                    File(audioTempPath).renameTo(finalAudio)
-                    finalLocalPath = finalAudio.absolutePath
-                } else {
+                if (result !is DownloadResult.Success) {
                     throw Exception((result as DownloadResult.Error).message)
                 }
             } else {
                 // Video Download
                 mimeType = "video/mp4"
+                val finalVideoFile = File(tempDir, "final_video.mp4")
+                finalLocalPath = finalVideoFile.absolutePath
                 
                 // Cobalt automatically handles merging video and audio on server-side 
                 // when we request qualities like "1080", "720", "480", "360".
                 // Therefore we fetch the combined video directly, eliminating device-side CPU strain!
-                val videoTempPath = File(tempDir, "video.tmp").absolutePath
                 _downloadState.value = DownloadState.Downloading(
                     DownloadProgress(0f, 0L, null, 0L, null),
                     "Downloading video..."
                 )
 
-                val result = extractor.download(url, targetHeight, videoTempPath) { progress ->
-                    _downloadState.value = DownloadState.Downloading(progress, "Downloading Video")
-                    onServiceAction("UPDATE_PROGRESS", "${progress.percent.toInt()}%")
+                val heightsToTry = mutableListOf<String>()
+                heightsToTry.add(targetHeight)
+                
+                val allResolutions = listOf("1080", "720", "480", "360")
+                val targetIndex = allResolutions.indexOf(targetHeight)
+                if (targetIndex != -1) {
+                    for (i in (targetIndex + 1) until allResolutions.size) {
+                        heightsToTry.add(allResolutions[i])
+                    }
                 }
 
-                if (result is DownloadResult.Success) {
-                    val finalVideo = File(tempDir, "final_video.mp4")
-                    File(videoTempPath).renameTo(finalVideo)
-                    finalLocalPath = finalVideo.absolutePath
-                } else {
-                    // Fallback logic for separate streams (if we ever need to manually merge)
-                    throw Exception((result as DownloadResult.Error).message)
+                var downloadSuccess = false
+                var lastDownloadError = ""
+
+                for (height in heightsToTry) {
+                    actualHeightUsed = height
+                    if (height != targetHeight) {
+                        Log.d(TAG, "Falling back to lower quality: ${height}p")
+                        _downloadState.value = DownloadState.Downloading(
+                            DownloadProgress(0f, 0L, null, 0L, null),
+                            "Retrying in ${height}p..."
+                        )
+                        onServiceAction("UPDATE_STATUS", "Retrying in ${height}p...")
+                    }
+
+                    val result = extractor.download(url, height, finalLocalPath) { progress ->
+                        _downloadState.value = DownloadState.Downloading(progress, "Downloading Video (${height}p)")
+                        onServiceAction("UPDATE_PROGRESS", "${progress.percent.toInt()}%")
+                    }
+
+                    if (result is DownloadResult.Success) {
+                        downloadSuccess = true
+                        break
+                    } else {
+                        lastDownloadError = (result as DownloadResult.Error).message
+                        Log.w(TAG, "Download failed for quality ${height}p: $lastDownloadError")
+                        val partialFile = File(finalLocalPath)
+                        if (partialFile.exists()) {
+                            partialFile.delete()
+                        }
+                    }
+                }
+
+                if (!downloadSuccess) {
+                    throw Exception(if (lastDownloadError.isNotEmpty()) lastDownloadError else "All downloaded quality attempts failed.")
                 }
             }
 
@@ -140,7 +173,7 @@ object MediaDownloadManager {
             onServiceAction("UPDATE_STATUS", "Saving to gallery...")
 
             val savedFile = File(finalLocalPath)
-            val mediaStoreUri = MediaStoreManager.saveVideoToGallery(
+            val mediaStoreUri = com.example.media.FileStorageUtility.moveVideoToPublicFolder(
                 context = context,
                 localFile = savedFile,
                 title = videoInfo.title,
@@ -154,6 +187,9 @@ object MediaDownloadManager {
                     uri = mediaStoreUri.toString()
                 )
 
+                val finalFormat = videoInfo.formats.find { it.formatId == actualHeightUsed } ?: selectedFormat
+                val finalSize = if (savedFile.exists()) savedFile.length() else finalFormat?.approximateFileSize
+
                 // Write history to Room
                 val entity = DownloadEntity(
                     mediaId = videoInfo.id,
@@ -161,8 +197,8 @@ object MediaDownloadManager {
                     source = videoInfo.source,
                     thumbnailUrl = videoInfo.thumbnail,
                     localUri = mediaStoreUri.toString(),
-                    fileSize = selectedFormat?.approximateFileSize,
-                    resolution = if (isAudioOnly) "Audio" else selectedFormat?.resolution ?: "${targetHeight}p",
+                    fileSize = finalSize,
+                    resolution = if (isAudioOnly) "Audio" else finalFormat?.resolution ?: "${actualHeightUsed}p",
                     extension = finalExtension,
                     status = "Completed"
                 )
