@@ -476,8 +476,8 @@ fun YouTubeCookieExtractorDialog(
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
                                     databaseEnabled = true
-                                    // Bypass Google login blocks inside WebViews by using a macOS Safari User-Agent (which doesn't trigger Chromium JS API checks)
-                                    userAgentString = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+                                    // Bypass Google login blocks inside WebViews by using a Windows Desktop Chrome User-Agent (which doesn't trigger Chromium JS API checks and is fully trusted)
+                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                                 }
                                 val cookieManager = android.webkit.CookieManager.getInstance()
                                 cookieManager.setAcceptCookie(true)
@@ -498,6 +498,11 @@ fun YouTubeCookieExtractorDialog(
                                         val cookies = cookieManager.getCookie("https://.youtube.com") ?: cookieManager.getCookie("https://www.youtube.com")
                                         if (!cookies.isNullOrEmpty()) {
                                             extractedCookie = cookies
+                                            if (cookies.contains("SID=") || cookies.contains("__Secure-3PSID=")) {
+                                                cookieManager.flush()
+                                                onCookieExtracted(cookies)
+                                                onDismiss()
+                                            }
                                         }
                                     }
 
@@ -512,8 +517,8 @@ fun YouTubeCookieExtractorDialog(
                                         handler?.proceed()
                                     }
                                 }
-                                // Direct YouTube service login URL via Google Accounts
-                                loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2F")
+                                // Direct YouTube sign-in page, which redirects cleanly to Google Account login
+                                loadUrl("https://www.youtube.com/signin")
                             }
                         },
                         modifier = Modifier.fillMaxSize()

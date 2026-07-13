@@ -57,6 +57,9 @@ fun HomeScreen(
     var selectedTab by remember { mutableStateOf(0) } // 0 = Single, 1 = Batch Queue
     var batchInput by remember { mutableStateOf("") }
 
+    var showVerificationDialog by remember { mutableStateOf(false) }
+    var showExtractorDialogAfterFailure by remember { mutableStateOf(false) }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -84,7 +87,18 @@ fun HomeScreen(
         if (extractionState is ExtractionState.Success) {
             onNavigateToAnalysis()
         } else if (extractionState is ExtractionState.Error) {
-            Toast.makeText(context, (extractionState as ExtractionState.Error).message, Toast.LENGTH_LONG).show()
+            val errorMsg = (extractionState as ExtractionState.Error).message
+            if (errorMsg.contains("requires account verification") || 
+                errorMsg.contains("login") || 
+                errorMsg.contains("cookie") ||
+                errorMsg.contains("bot detection") ||
+                errorMsg.contains("rate-limited") ||
+                errorMsg.contains("extraction server")
+            ) {
+                showVerificationDialog = true
+            } else {
+                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+            }
             viewModel.resetExtraction()
         }
     }
@@ -609,6 +623,67 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (showVerificationDialog) {
+        AlertDialog(
+            onDismissRequest = { showVerificationDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VpnKey,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("YouTube Verification Required")
+                }
+            },
+            text = {
+                Text(
+                    text = "YouTube requires a one-time account verification to extract and download this video.\n\n" +
+                           "The app will securely open a safe browser to YouTube's official login page. After you sign in, the app will automatically capture your session cookies, return back here, and start your download immediately.\n\n" +
+                           "This is a one-time setup, so you won't need to sign in again.",
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { showVerificationDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showVerificationDialog = false
+                        showExtractorDialogAfterFailure = true
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("Verify Now")
+                }
+            }
+        )
+    }
+
+    if (showExtractorDialogAfterFailure) {
+        YouTubeCookieExtractorDialog(
+            onDismiss = { showExtractorDialogAfterFailure = false },
+            onCookieExtracted = { cookie ->
+                val sharedPrefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+                sharedPrefs.edit().putString("custom_youtube_cookie", cookie).apply()
+                com.example.extractor.YtDlpManager.customYoutubeCookie = cookie
+                
+                showExtractorDialogAfterFailure = false
+                Toast.makeText(context, "Verification successful! Resuming download...", Toast.LENGTH_SHORT).show()
+                viewModel.analyzeUrl()
+            }
+        )
     }
 }
 
