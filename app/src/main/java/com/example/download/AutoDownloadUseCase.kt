@@ -19,8 +19,8 @@ class AutoDownloadUseCase(private val context: Context) {
             onServiceAction("UPDATE_TITLE", videoInfo.title)
 
             val availableFormats = FormatSelector.getAvailableQualities(videoInfo.formats)
-            val bestFormat = availableFormats.firstOrNull { (it.height ?: 0) <= 1080 }
-                ?: availableFormats.firstOrNull()
+            // Select the absolute highest quality format available
+            val bestFormat = availableFormats.firstOrNull()
                 ?: videoInfo.formats.firstOrNull()
 
             val formatId = bestFormat?.formatId ?: "1080"

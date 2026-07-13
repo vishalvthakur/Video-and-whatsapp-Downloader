@@ -2,7 +2,9 @@ package com.example.presentation
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,6 +21,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import android.content.Context
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -34,6 +40,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("video_downloader_prefs", Context.MODE_PRIVATE) }
     var customUrl by remember { mutableStateOf(sharedPrefs.getString("custom_cobalt_url", "") ?: "") }
+    var customCookie by remember { mutableStateOf(sharedPrefs.getString("custom_youtube_cookie", "") ?: "") }
+    var showCookieExtractor by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -58,7 +66,8 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(20.dp),
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Storage Settings Card
@@ -150,13 +159,168 @@ fun SettingsScreen(
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline
                         )
                     )
+
+                    Text(
+                        text = "Quick Presets:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        val presets = listOf(
+                            Triple("Official", "", "Default official API"),
+                            Triple("Xenon", "https://rue-cobalt.xenon.zone", "Alternate public instance"),
+                            Triple("Kittycat", "https://dog.kittycat.boo", "Alternate public instance"),
+                            Triple("CJS", "https://cobaltapi.cjs.nz", "Alternate public instance")
+                        )
+                        presets.forEach { (name, url, desc) ->
+                            val isSelected = (customUrl.trim() == url.trim())
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    customUrl = url
+                                    sharedPrefs.edit().putString("custom_cobalt_url", url).apply()
+                                    com.example.extractor.YtDlpManager.customCobaltUrl = url
+                                },
+                                label = { Text(name, fontSize = 12.sp) }
+                            )
+                        }
+                    }
                     
                     Text(
-                        text = "Leave blank to use the official server (api.cobalt.tools). If you experience connection or resolution errors, you can specify an alternate working Cobalt instance.",
+                        text = "Leave blank to use the official server (api.cobalt.tools). If you experience connection or resolution errors (like error.api.youtube.login), you can specify or quick-select an alternate working Cobalt instance.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         lineHeight = 16.sp
                     )
+                }
+            }
+
+            // YouTube Bot Bypass Settings Card
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VpnKey,
+                            contentDescription = "Bypass Config",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "YouTube Bot Bypass",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Automate session cookies to prevent YouTube bot blocking.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { showCookieExtractor = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VpnKey,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("🔑 Sign in & Auto-Extract Cookie")
+                    }
+
+                    OutlinedTextField(
+                        value = customCookie,
+                        onValueChange = { newValue ->
+                            customCookie = newValue
+                            sharedPrefs.edit().putString("custom_youtube_cookie", newValue.trim()).apply()
+                            com.example.extractor.YtDlpManager.customYoutubeCookie = newValue.trim()
+                        },
+                        label = { Text("Local YouTube Cookie string (Optional)") },
+                        placeholder = { Text("__Secure-3PAPISID=...; __Secure-3PSID=...; SID=...") },
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "💡 How to extract your YouTube cookie string:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "1. On a computer, open youtube.com and login to your account.\n" +
+                                   "2. Right-click and choose \"Inspect\" or press F12, then select the \"Console\" tab.\n" +
+                                   "3. Copy and run: copy(document.cookie) then paste the clipboard content in the input field above.\n" +
+                                   "Or use a cookie export extension (like \"Get cookies.txt\") to get the text format.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.background, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "🐳 For Self-Hosted Cobalt API users:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "To bypass YouTube blocking automatically on your own server, set these Environment Variables in your server setup:\n" +
+                                   "• YT_CONN_SESSION_GENERATOR = true (enables automated YouTube sessions)\n" +
+                                   "• YOUTUBE_COOKIE = [Your extracted cookie string]",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
             }
 
@@ -228,6 +392,144 @@ fun SettingsScreen(
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCookieExtractor) {
+        YouTubeCookieExtractorDialog(
+            onDismiss = { showCookieExtractor = false },
+            onCookieExtracted = { extracted ->
+                customCookie = extracted
+                sharedPrefs.edit().putString("custom_youtube_cookie", extracted).apply()
+                com.example.extractor.YtDlpManager.customYoutubeCookie = extracted
+            }
+        )
+    }
+}
+
+@Composable
+fun YouTubeCookieExtractorDialog(
+    onDismiss: () -> Unit,
+    onCookieExtracted: (String) -> Unit
+) {
+    var extractedCookie by remember { mutableStateOf("") }
+    var pageUrl by remember { mutableStateOf("https://m.youtube.com") }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "YouTube Session Login",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Sign in to your YouTube account to automatically extract the cookies.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                // WebView
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(Color.White)
+                ) {
+                    AndroidView(
+                        factory = { context ->
+                            android.webkit.WebView(context).apply {
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                                }
+                                val cookieManager = android.webkit.CookieManager.getInstance()
+                                cookieManager.setAcceptCookie(true)
+                                cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                                webViewClient = object : android.webkit.WebViewClient() {
+                                    override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                        super.onPageFinished(view, url)
+                                        url?.let { pageUrl = it }
+                                        val cookies = cookieManager.getCookie("https://.youtube.com") ?: cookieManager.getCookie("https://www.youtube.com")
+                                        if (!cookies.isNullOrEmpty()) {
+                                            extractedCookie = cookies
+                                        }
+                                    }
+                                }
+                                loadUrl("https://m.youtube.com/login")
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // Footer controls
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (extractedCookie.contains("SID=")) "✅ Cookie Extracted (Logged In)" else "ℹ️ Please sign in to your Google Account on YouTube",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (extractedCookie.contains("SID=")) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            onClick = {
+                                if (extractedCookie.isNotEmpty()) {
+                                    onCookieExtracted(extractedCookie)
+                                }
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Apply Cookie")
+                        }
                     }
                 }
             }

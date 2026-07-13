@@ -23,6 +23,12 @@ class VideoDownloadService : Service() {
     override fun onCreate() {
         super.onCreate()
         notificationManager = DownloadNotificationManager(this)
+
+        // Initialize Cobalt Custom API URL & YouTube Cookie for headless background execution
+        val sharedPrefs = getSharedPreferences("video_downloader_prefs", android.content.Context.MODE_PRIVATE)
+        com.example.extractor.YtDlpManager.customCobaltUrl = sharedPrefs.getString("custom_cobalt_url", null)
+        com.example.extractor.YtDlpManager.customYoutubeCookie = sharedPrefs.getString("custom_youtube_cookie", null)
+        Log.d("VideoDownloadService", "Headless init: Custom URL = ${com.example.extractor.YtDlpManager.customCobaltUrl != null}, Cookie set = ${com.example.extractor.YtDlpManager.customYoutubeCookie != null}")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

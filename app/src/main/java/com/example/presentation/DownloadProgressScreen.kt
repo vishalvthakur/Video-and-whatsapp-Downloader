@@ -231,20 +231,63 @@ fun DownloadProgressScreen(
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(72.dp)
                     )
+                    
+                    val errorMsg = state.error
+                    val isYoutubeLoginError = errorMsg.contains("error.api.youtube.login", ignoreCase = true) || 
+                                              errorMsg.contains("login", ignoreCase = true)
+                    
                     Text(
-                        text = "Download Failed",
+                        text = if (isYoutubeLoginError) "Video Restricted" else "Download Failed",
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
                         color = MaterialTheme.colorScheme.error
                     )
                     Text(
-                        text = state.error,
+                        text = if (isYoutubeLoginError) 
+                            "This video requires sign-in/verification or is restricted by YouTube." 
+                            else errorMsg,
                         textAlign = TextAlign.Center,
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 20.sp,
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
+
+                    if (isYoutubeLoginError) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Why did this happen?",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "YouTube occasionally triggers anti-bot challenges (or age-restrictions) that block public scraper nodes from playing or downloading the stream without logging in.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 16.sp
+                                )
+                                Text(
+                                    text = "💡 You can try setting a custom Cobalt instance in Settings, downloading audio-only, or trying a different video URL.",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(16.dp))
 

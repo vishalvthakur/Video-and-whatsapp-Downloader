@@ -16,6 +16,9 @@ object YtDlpManager {
     
     @Volatile
     var customCobaltUrl: String? = null
+
+    @Volatile
+    var customYoutubeCookie: String? = null
     
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -34,34 +37,74 @@ object YtDlpManager {
         var description: String? = null
         var duration: Long? = null
 
-        // Try oEmbed first
-        try {
-            val oEmbedUrl = "https://noembed.com/embed?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
-            val request = Request.Builder().url(oEmbedUrl).build()
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val bodyString = response.body?.string()
-                    if (!bodyString.isNullOrEmpty()) {
-                        val json = JSONObject(bodyString)
-                        if (json.has("title")) title = json.getString("title")
-                        if (json.has("thumbnail_url")) thumbnail = json.getString("thumbnail_url")
-                        if (json.has("author_name")) uploader = json.getString("author_name")
-                        if (json.has("provider_name")) source = json.getString("provider_name")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "oEmbed fetch failed", e)
-        }
+        val isYouTube = url.contains("youtube.com") || url.contains("youtu.be")
 
-        // If title or thumbnail is missing, fallback to OpenGraph parsing
-        if (title == "Video Downloader Content" || thumbnail == null) {
+        // 1. Try official YouTube oEmbed first for YouTube links
+        if (isYouTube) {
             try {
+                val ytOembedUrl = "https://www.youtube.com/oembed?url=${java.net.URLEncoder.encode(url, "UTF-8")}&format=json"
                 val request = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .url(ytOembedUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
                     .build()
                 client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val bodyString = response.body?.string()
+                        if (!bodyString.isNullOrEmpty()) {
+                            val json = JSONObject(bodyString)
+                            if (json.has("title")) title = json.getString("title")
+                            if (json.has("thumbnail_url")) thumbnail = json.getString("thumbnail_url")
+                            if (json.has("author_name")) uploader = json.getString("author_name")
+                            source = "YouTube"
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Official YouTube oEmbed fetch failed", e)
+            }
+        }
+
+        // 2. Try generic oEmbed (noembed) if still missing information
+        if (title == "Video Downloader Content" || thumbnail == null) {
+            try {
+                val oEmbedUrl = "https://noembed.com/embed?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
+                val request = Request.Builder().url(oEmbedUrl).build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val bodyString = response.body?.string()
+                        if (!bodyString.isNullOrEmpty()) {
+                            val json = JSONObject(bodyString)
+                            if (json.has("title")) title = json.getString("title")
+                            if (json.has("thumbnail_url")) thumbnail = json.getString("thumbnail_url")
+                            if (json.has("author_name") && uploader == null) uploader = json.getString("author_name")
+                            if (json.has("provider_name") && source == null) source = json.getString("provider_name")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "oEmbed fetch failed", e)
+            }
+        }
+
+        // 3. Fallback to OpenGraph HTML Scraping with browser headers and user cookie if still missing
+        if (title == "Video Downloader Content" || thumbnail == null) {
+            try {
+                val requestBuilder = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Sec-Ch-Ua", "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"")
+                    .header("Sec-Ch-Ua-Mobile", "?0")
+                    .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+
+                customYoutubeCookie?.let {
+                    if (it.isNotEmpty()) {
+                        requestBuilder.header("Cookie", it)
+                    }
+                }
+
+                client.newCall(requestBuilder.build()).execute().use { response ->
                     if (response.isSuccessful) {
                         val html = response.body?.string() ?: ""
                         
@@ -175,57 +218,102 @@ object YtDlpManager {
             cobaltUrls.add(formatted)
         }
         
-        // Add verified public Cobalt instances (root-path v10+)
+        // Add verified public Cobalt instances (v10+)
         cobaltUrls.add("https://rue-cobalt.xenon.zone/")
         cobaltUrls.add("https://dog.kittycat.boo/")
         cobaltUrls.add("https://cobaltapi.cjs.nz/")
 
         var lastError = ""
-        for (apiUrl in cobaltUrls) {
-            try {
-                val jsonObject = JSONObject().apply {
-                    put("url", url)
-                    put("videoQuality", quality)
-                    put("downloadMode", if (isAudioOnly) "audio" else "auto")
-                }
+        for (baseApiUrl in cobaltUrls) {
+            // First try Cobalt v10+ format, then fallback to Cobalt v7 style
+            val attempts = if (baseApiUrl.endsWith("/api/json")) {
+                // If it already ends with api/json, try v7 directly
+                listOf(Pair(baseApiUrl, 7))
+            } else {
+                listOf(
+                    Pair(baseApiUrl, 10),
+                    Pair(if (baseApiUrl.endsWith("/")) "${baseApiUrl}api/json" else "$baseApiUrl/api/json", 7)
+                )
+            }
 
-                val requestBody = jsonObject.toString().toRequestBody("application/json".toMediaType())
-                val request = Request.Builder()
-                    .url(apiUrl)
-                    .post(requestBody)
-                    .header("Accept", "application/json")
-                    .header("Content-Type", "application/json")
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    val responseString = response.body?.string() ?: ""
-                    if (response.isSuccessful && responseString.isNotEmpty()) {
-                        val responseJson = JSONObject(responseString)
-                        val status = responseJson.optString("status", "")
-                        
-                        if (status == "success" || status == "stream" || status == "redirect" || status == "tunnel") {
-                            val streamUrl = responseJson.getString("url")
-                            val filename = responseJson.optString("filename", "video.mp4")
-                            return Pair(streamUrl, filename)
-                        } else if (status == "picker") {
-                            val pickerArray = responseJson.getJSONArray("picker")
-                            if (pickerArray.length() > 0) {
-                                val item = pickerArray.getJSONObject(0)
-                                val streamUrl = item.getString("url")
-                                val filename = responseJson.optString("filename", "video.mp4")
-                                return Pair(streamUrl, filename)
-                            }
-                        } else if (status == "error") {
-                            val text = responseJson.optString("text", "Unknown extraction error")
-                            lastError = text
+            for ((requestUrl, apiVersion) in attempts) {
+                try {
+                    val jsonObject = JSONObject().apply {
+                        put("url", url)
+                        put("videoQuality", quality)
+                        if (apiVersion == 10) {
+                            put("downloadMode", if (isAudioOnly) "audio" else "auto")
+                        } else {
+                            put("isAudioOnly", isAudioOnly)
                         }
-                    } else {
-                        lastError = "HTTP ${response.code}: ${response.message}"
                     }
+
+                    val requestBody = jsonObject.toString().toRequestBody("application/json".toMediaType())
+                    val requestBuilder = Request.Builder()
+                        .url(requestUrl)
+                        .post(requestBody)
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                        .header("Origin", "https://cobalt.tools")
+                        .header("Referer", "https://cobalt.tools/")
+                        .header("Sec-Ch-Ua", "\"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"")
+                        .header("Sec-Ch-Ua-Mobile", "?0")
+                        .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+
+                    customYoutubeCookie?.let {
+                        if (it.isNotEmpty()) {
+                            requestBuilder.header("Cookie", it)
+                        }
+                    }
+
+                    val request = requestBuilder.build()
+
+                    client.newCall(request).execute().use { response ->
+                        val responseString = response.body?.string() ?: ""
+                        if (responseString.isNotEmpty()) {
+                            val responseJson = JSONObject(responseString)
+                            val status = responseJson.optString("status", "")
+                            
+                            if (response.isSuccessful && (status == "success" || status == "stream" || status == "redirect" || status == "tunnel" || responseJson.has("url"))) {
+                                val streamUrl = responseJson.optString("url", "")
+                                if (streamUrl.isNotEmpty()) {
+                                    val filename = responseJson.optString("filename", "video.mp4")
+                                    return Pair(streamUrl, filename)
+                                }
+                            } else if (response.isSuccessful && status == "picker") {
+                                val pickerArray = responseJson.optJSONArray("picker")
+                                if (pickerArray != null && pickerArray.length() > 0) {
+                                    val item = pickerArray.getJSONObject(0)
+                                    val streamUrl = item.optString("url", "")
+                                    if (streamUrl.isNotEmpty()) {
+                                        val filename = responseJson.optString("filename", "video.mp4")
+                                        return Pair(streamUrl, filename)
+                                    }
+                                }
+                            }
+                            
+                            // Extract detailed Cobalt API error code if unsuccessful or status is error
+                            val errorObj = responseJson.optJSONObject("error")
+                            val errorCode = errorObj?.optString("code") ?: responseJson.optString("error")
+                            if (!errorCode.isNullOrEmpty()) {
+                                lastError = errorCode
+                            } else {
+                                val text = responseJson.optString("text")
+                                if (text.isNotEmpty()) {
+                                    lastError = text
+                                } else {
+                                    lastError = "HTTP ${response.code}: ${response.message}"
+                                }
+                            }
+                        } else {
+                            lastError = "HTTP ${response.code}: ${response.message}"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = e.message ?: "Network error"
+                    Log.e(TAG, "Cobalt request failed on $requestUrl (v$apiVersion)", e)
                 }
-            } catch (e: Exception) {
-                lastError = e.message ?: "Network error"
-                Log.e(TAG, "Cobalt instance $apiUrl failed", e)
             }
         }
         

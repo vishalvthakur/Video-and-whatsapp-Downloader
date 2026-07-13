@@ -49,9 +49,10 @@ class MainActivity : ComponentActivity() {
         // Initialize download manager on start
         MediaDownloadManager.init(this)
 
-        // Initialize Cobalt Custom API URL
+        // Initialize Cobalt Custom API URL & YouTube Cookie
         val sharedPrefs = getSharedPreferences("video_downloader_prefs", android.content.Context.MODE_PRIVATE)
         com.example.extractor.YtDlpManager.customCobaltUrl = sharedPrefs.getString("custom_cobalt_url", null)
+        com.example.extractor.YtDlpManager.customYoutubeCookie = sharedPrefs.getString("custom_youtube_cookie", null)
 
         setContent {
             MyApplicationTheme {
