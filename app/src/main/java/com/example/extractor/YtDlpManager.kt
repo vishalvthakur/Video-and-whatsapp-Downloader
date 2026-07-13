@@ -218,9 +218,13 @@ object YtDlpManager {
             cobaltUrls.add(formatted)
         }
         
-        // Add verified public Cobalt instances (v10+)
+        // Add verified public Cobalt instances (v10+ and alternates)
         cobaltUrls.add("https://rue-cobalt.xenon.zone/")
         cobaltUrls.add("https://dog.kittycat.boo/")
+        cobaltUrls.add("https://cobalt.fast-ref.xyz/")
+        cobaltUrls.add("https://cobalt.pablomg.net/")
+        cobaltUrls.add("https://co.wuk.sh/")
+        cobaltUrls.add("https://api.cobalt.tools/")
         cobaltUrls.add("https://cobaltapi.cjs.nz/")
 
         var lastError = ""
@@ -236,7 +240,9 @@ object YtDlpManager {
                 )
             }
 
+            var skipRemainingAttempts = false
             for ((requestUrl, apiVersion) in attempts) {
+                if (skipRemainingAttempts) break
                 try {
                     val jsonObject = JSONObject().apply {
                         put("url", url)
@@ -284,6 +290,8 @@ object YtDlpManager {
                                 lastError = "Server returned an invalid non-JSON response (HTTP ${response.code})."
                                 Log.w(TAG, "Server $requestUrl returned non-JSON: ${trimmedResponse.take(200)}")
                             } else {
+                                // Received JSON response - don't fall back to older API versions on this server
+                                skipRemainingAttempts = true
                                 val responseJson = JSONObject(responseString)
                                 val status = responseJson.optString("status", "")
                                 
@@ -309,11 +317,11 @@ object YtDlpManager {
                                 val errorObj = responseJson.optJSONObject("error")
                                 val errorCode = errorObj?.optString("code") ?: responseJson.optString("error")
                                 if (!errorCode.isNullOrEmpty()) {
-                                    lastError = errorCode
+                                    lastError = mapCobaltError(errorCode)
                                 } else {
                                     val text = responseJson.optString("text")
                                     if (text.isNotEmpty()) {
-                                        lastError = text
+                                        lastError = mapCobaltError(text)
                                     } else {
                                         lastError = "HTTP ${response.code}: ${response.message}"
                                     }
@@ -331,5 +339,26 @@ object YtDlpManager {
         }
         
         throw Exception(if (lastError.isNotEmpty()) lastError else "Failed to connect to extraction servers")
+    }
+
+    private fun mapCobaltError(code: String): String {
+        return when {
+            code.contains("login") || code.contains("cookie") -> {
+                "YouTube requires account verification or session cookies to download this video. Please go to Settings ⚙️ and click 'Sign in & Auto-Extract Cookie' to authenticate."
+            }
+            code.contains("decryption") || code.contains("signature") || code.contains("cipher") -> {
+                "YouTube's signature cipher decryption failed. Try selecting an alternate Cobalt preset or updating your cookie in Settings ⚙️."
+            }
+            code.contains("rate_limit") || code.contains("rate-limit") || code.contains("429") -> {
+                "This extraction server is rate-limited or blocked by YouTube's bot protection. Please select a different Cobalt preset in Settings ⚙️."
+            }
+            code.contains("age_restricted") || code.contains("restricted") -> {
+                "This video is restricted or age-gated. Please go to Settings ⚙️ and use 'Sign in & Auto-Extract Cookie' to authenticate."
+            }
+            code.contains("unsupported") -> {
+                "This video format or URL is not supported by the extraction server."
+            }
+            else -> code
+        }
     }
 }

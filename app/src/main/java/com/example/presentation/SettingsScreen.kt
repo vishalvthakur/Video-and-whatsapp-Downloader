@@ -177,6 +177,9 @@ fun SettingsScreen(
                             Triple("Official", "", "Default official API"),
                             Triple("Xenon", "https://rue-cobalt.xenon.zone", "Alternate public instance"),
                             Triple("Kittycat", "https://dog.kittycat.boo", "Alternate public instance"),
+                            Triple("Fast-Ref", "https://cobalt.fast-ref.xyz", "Alternate public instance"),
+                            Triple("PabloMG", "https://cobalt.pablomg.net", "Alternate public instance"),
+                            Triple("Wuk", "https://co.wuk.sh", "Alternate public instance"),
                             Triple("CJS", "https://cobaltapi.cjs.nz", "Alternate public instance")
                         )
                         presets.forEach { (name, url, desc) ->
@@ -473,8 +476,8 @@ fun YouTubeCookieExtractorDialog(
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
                                     databaseEnabled = true
-                                    // Bypass Google login blocks inside WebViews by using a standard Desktop Chrome User-Agent
-                                    userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                                    // Bypass Google login blocks inside WebViews by using a macOS Safari User-Agent (which doesn't trigger Chromium JS API checks)
+                                    userAgentString = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
                                 }
                                 val cookieManager = android.webkit.CookieManager.getInstance()
                                 cookieManager.setAcceptCookie(true)
