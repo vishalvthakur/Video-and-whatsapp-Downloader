@@ -259,13 +259,20 @@ object YtDlpManager {
                 try {
                     val jsonObject = JSONObject().apply {
                         put("url", url)
-                        put("videoQuality", quality)
                         if (apiVersion == 10) {
+                            val mappedQuality = when (quality) {
+                                "1080" -> "1080p"
+                                "720" -> "720p"
+                                "480" -> "480p"
+                                "360" -> "360p"
+                                else -> if (quality.endsWith("p") || quality == "max") quality else "${quality}p"
+                            }
+                            put("videoQuality", mappedQuality)
                             put("downloadMode", if (isAudioOnly) "audio" else "video")
                             put("alwaysProxy", true) // Request Cobalt server to proxy/tunnel the download
-                            put("tunnelSource", true) // Fallback proxy parameter
                             put("youtubeVideoCodec", "h264") // highly compatible h264
                         } else {
+                            put("videoQuality", quality)
                             put("isAudioOnly", isAudioOnly)
                             put("isTunnel", true) // Request Cobalt server to proxy/tunnel the download
                             put("youtubeVideoCodec", "h264") // highly compatible h264

@@ -23,6 +23,7 @@ import java.nio.ByteBuffer
 object MediaMergeManager {
     private const val TAG = "MediaMergeManager"
 
+    @Suppress("WrongConstant")
     suspend fun mergeVideoAndAudio(
         videoPath: String,
         audioPath: String,
