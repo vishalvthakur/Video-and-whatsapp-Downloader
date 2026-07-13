@@ -23,7 +23,11 @@ class YtDlpVideoExtractor : VideoExtractor {
     private var activeCall: okhttp3.Call? = null
 
     override suspend fun extract(url: String): VideoInfo = withContext(Dispatchers.IO) {
-        YtDlpManager.fetchMetadata(url)
+        if (url.contains("instagram.com") || url.contains("instagr.am")) {
+            InstagramScraperService.extract(url)
+        } else {
+            YtDlpManager.fetchMetadata(url)
+        }
     }
 
     override suspend fun download(
@@ -32,6 +36,9 @@ class YtDlpVideoExtractor : VideoExtractor {
         outputPath: String,
         onProgress: (DownloadProgress) -> Unit
     ): DownloadResult = withContext(Dispatchers.IO) {
+        if (url.contains("instagram.com") || url.contains("instagr.am")) {
+            return@withContext InstagramScraperService.download(url, formatSelector, outputPath, onProgress)
+        }
         val isAudioOnly = formatSelector.equals("audio", ignoreCase = true)
         val quality = if (isAudioOnly) "max" else formatSelector // e.g. "1080", "720" etc.
         
@@ -64,9 +71,9 @@ class YtDlpVideoExtractor : VideoExtractor {
                 requestBuilder.header("Accept", "*/*")
                 requestBuilder.header("Accept-Language", "en-US,en;q=0.9")
                 
-                if (currentStreamUrl.contains("instagram.com") || currentStreamUrl.contains("cdninstagram.com")) {
+                if (currentStreamUrl.contains("instagram.com") || currentStreamUrl.contains("cdninstagram.com") || currentStreamUrl.contains("fbcdn.net")) {
                     requestBuilder.header("Referer", "https://www.instagram.com/")
-                    requestBuilder.header("Origin", "https://www.instagram.com")
+                    // DO NOT send Origin header for direct media CDN assets to avoid CORS 403 blocks
                 } else if (currentStreamUrl.contains("googlevideo.com")) {
                     requestBuilder.header("Referer", "https://www.youtube.com/")
                 } else {
@@ -202,6 +209,9 @@ class YtDlpVideoExtractor : VideoExtractor {
                     return@withContext DownloadResult.Error("Download cancelled")
                 }
                 
+                // Clear stream URL on failure to force a fresh lookup from public fallback servers on retry
+                currentStreamUrl = ""
+                
                 if (currentAttempt >= maxAttempts) {
                     return@withContext DownloadResult.Error("Download failed after $maxAttempts attempts. Details: ${e.message}")
                 }
@@ -217,6 +227,7 @@ class YtDlpVideoExtractor : VideoExtractor {
     }
 
     override fun cancel() {
+        InstagramScraperService.cancel()
         activeCall?.cancel()
         activeCall = null
     }

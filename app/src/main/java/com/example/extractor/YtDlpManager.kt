@@ -229,9 +229,18 @@ object YtDlpManager {
         cobaltUrls.add("https://cobalt.lucasl.dev/")
         cobaltUrls.add("https://cobalt.k6.vc/")
         cobaltUrls.add("https://co.v9.sh/")
-        cobaltUrls.add("https://cobalt.populas.org/")
 
-        var lastError = ""
+        var bestError = ""
+        var bestErrorPriority = 0 // 0 = none, 1 = low, 2 = medium, 3 = high
+
+        val updateError = { newError: String, priority: Int ->
+            if (priority > bestErrorPriority) {
+                bestError = newError
+                bestErrorPriority = priority
+            } else if (priority == bestErrorPriority && bestError.isEmpty()) {
+                bestError = newError
+            }
+        }
         for (baseApiUrl in cobaltUrls) {
             // First try Cobalt v10+ format, then fallback to Cobalt v7 style
             val attempts = if (baseApiUrl.endsWith("/api/json")) {
@@ -252,7 +261,7 @@ object YtDlpManager {
                         put("url", url)
                         put("videoQuality", quality)
                         if (apiVersion == 10) {
-                            put("downloadMode", if (isAudioOnly) "audio" else "auto")
+                            put("downloadMode", if (isAudioOnly) "audio" else "video")
                             put("alwaysProxy", true) // Request Cobalt server to proxy/tunnel the download
                             put("tunnelSource", true) // Fallback proxy parameter
                             put("youtubeVideoCodec", "h264") // highly compatible h264
@@ -289,14 +298,16 @@ object YtDlpManager {
                         val trimmedResponse = responseString.trim()
                         if (trimmedResponse.isNotEmpty()) {
                             if (trimmedResponse.startsWith("<!DOCTYPE") || trimmedResponse.startsWith("<html") || trimmedResponse.startsWith("<HTML")) {
-                                if (!custom.isNullOrEmpty() && requestUrl.contains(custom)) {
-                                    lastError = "Your custom extraction server ($custom) returned an HTML web page instead of JSON API data. Please verify your custom URL is correct (e.g., includes the port like :9000 or ends with '/api/json' if required), and is not the front-end web UI."
+                                val err = if (!custom.isNullOrEmpty() && requestUrl.contains(custom)) {
+                                    "Your custom extraction server ($custom) returned an HTML web page instead of JSON API data. Please verify your custom URL is correct (e.g., includes the port like :9000 or ends with '/api/json' if required), and is not the front-end web UI."
                                 } else {
-                                    lastError = "The public extraction server ($requestUrl) returned an HTML error page. This usually means the server is blocked by YouTube's bot detection, rate-limited, or protected by a Cloudflare challenge."
+                                    "The public extraction server ($requestUrl) returned an HTML error page. This usually means the server is blocked by YouTube's bot detection, rate-limited, or protected by a Cloudflare challenge."
                                 }
+                                updateError(err, 1)
                                 Log.w(TAG, "Server $requestUrl returned HTML: ${trimmedResponse.take(200)}")
                             } else if (!trimmedResponse.startsWith("{") && !trimmedResponse.startsWith("[")) {
-                                lastError = "Server returned an invalid non-JSON response (HTTP ${response.code})."
+                                val err = "Server returned an invalid non-JSON response (HTTP ${response.code})."
+                                updateError(err, 1)
                                 Log.w(TAG, "Server $requestUrl returned non-JSON: ${trimmedResponse.take(200)}")
                             } else {
                                 // Received JSON response - don't fall back to older API versions on this server
@@ -313,11 +324,28 @@ object YtDlpManager {
                                 } else if (response.isSuccessful && status == "picker") {
                                     val pickerArray = responseJson.optJSONArray("picker")
                                     if (pickerArray != null && pickerArray.length() > 0) {
-                                        val item = pickerArray.getJSONObject(0)
-                                        val streamUrl = item.optString("url", "")
-                                        if (streamUrl.isNotEmpty()) {
+                                        var foundUrl = ""
+                                        // Try to find the first item of type "video"
+                                        for (i in 0 until pickerArray.length()) {
+                                            val item = pickerArray.getJSONObject(i)
+                                            val itemType = item.optString("type", "")
+                                            if (itemType == "video") {
+                                                val streamUrl = item.optString("url", "")
+                                                if (streamUrl.isNotEmpty()) {
+                                                    foundUrl = streamUrl
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        // If no video is found in the picker, fallback to the first item (might be a photo)
+                                        if (foundUrl.isEmpty()) {
+                                            val item = pickerArray.getJSONObject(0)
+                                            foundUrl = item.optString("url", "")
+                                        }
+
+                                        if (foundUrl.isNotEmpty()) {
                                             val filename = responseJson.optString("filename", "video.mp4")
-                                            return Pair(streamUrl, filename)
+                                            return Pair(foundUrl, filename)
                                         }
                                     }
                                 }
@@ -326,43 +354,75 @@ object YtDlpManager {
                                 val errorObj = responseJson.optJSONObject("error")
                                 val errorCode = errorObj?.optString("code") ?: responseJson.optString("error")
                                 if (!errorCode.isNullOrEmpty()) {
-                                    lastError = mapCobaltError(errorCode)
+                                    val mapped = mapCobaltError(errorCode, url)
+                                    val priority = getCobaltErrorPriority(errorCode)
+                                    updateError(mapped, priority)
                                 } else {
                                     val text = responseJson.optString("text")
                                     if (text.isNotEmpty()) {
-                                        lastError = mapCobaltError(text)
+                                        val mapped = mapCobaltError(text, url)
+                                        val priority = getCobaltErrorPriority(text)
+                                        updateError(mapped, priority)
                                     } else {
-                                        lastError = "HTTP ${response.code}: ${response.message}"
+                                        updateError("HTTP ${response.code}: ${response.message}", 1)
                                     }
                                 }
                             }
                         } else {
-                            lastError = "Empty response (HTTP ${response.code}: ${response.message})"
+                            updateError("Empty response (HTTP ${response.code}: ${response.message})", 1)
                         }
                     }
                 } catch (e: Exception) {
-                    lastError = e.message ?: "Network error"
+                    val msg = e.message ?: "Network error"
+                    updateError(msg, 1)
                     Log.e(TAG, "Cobalt request failed on $requestUrl (v$apiVersion)", e)
                 }
             }
         }
         
-        throw Exception(if (lastError.isNotEmpty()) lastError else "Failed to connect to extraction servers")
+        throw Exception(if (bestError.isNotEmpty()) bestError else "Failed to connect to extraction servers")
     }
 
-    private fun mapCobaltError(code: String): String {
+    private fun getCobaltErrorPriority(code: String): Int {
+        val lower = code.lowercase()
+        return when {
+            lower.contains("login") || lower.contains("cookie") ||
+            lower.contains("decryption") || lower.contains("signature") || lower.contains("cipher") ||
+            lower.contains("age_restricted") || lower.contains("restricted") -> 3
+            lower.contains("rate_limit") || lower.contains("rate-limit") || lower.contains("429") ||
+            lower.contains("unsupported") -> 2
+            else -> 1
+        }
+    }
+
+    private fun mapCobaltError(code: String, originalUrl: String): String {
+        val isInstagram = originalUrl.contains("instagram.com") || originalUrl.contains("instagr.am")
+        val isTiktok = originalUrl.contains("tiktok.com")
+        val serviceName = when {
+            isInstagram -> "Instagram"
+            isTiktok -> "TikTok"
+            else -> "YouTube"
+        }
         return when {
             code.contains("login") || code.contains("cookie") -> {
-                "YouTube requires account verification or session cookies to download this video. Please go to Settings ⚙️ and click 'Sign in & Auto-Extract Cookie' to authenticate."
+                if (isInstagram) {
+                    "Instagram requires account verification or session cookies to download this private/restricted video. Please make sure the post is public and accessible without logging in."
+                } else {
+                    "YouTube requires account verification or session cookies to download this video. Please go to Settings ⚙️ and click 'Sign in & Auto-Extract Cookie' to authenticate."
+                }
             }
             code.contains("decryption") || code.contains("signature") || code.contains("cipher") -> {
-                "YouTube's signature cipher decryption failed. Try selecting an alternate Cobalt preset or updating your cookie in Settings ⚙️."
+                "$serviceName's decryption/signature failed. Try selecting an alternate Cobalt preset or updating your cookie in Settings ⚙️."
             }
             code.contains("rate_limit") || code.contains("rate-limit") || code.contains("429") -> {
-                "This extraction server is rate-limited or blocked by YouTube's bot protection. Please select a different Cobalt preset in Settings ⚙️."
+                "This extraction server is rate-limited or blocked by $serviceName's bot protection. Please select a different Cobalt preset in Settings ⚙️."
             }
             code.contains("age_restricted") || code.contains("restricted") -> {
-                "This video is restricted or age-gated. Please go to Settings ⚙️ and use 'Sign in & Auto-Extract Cookie' to authenticate."
+                if (isInstagram) {
+                    "This Instagram video is restricted or age-gated. Please try another post or select an alternate Cobalt preset."
+                } else {
+                    "This video is restricted or age-gated. Please go to Settings ⚙️ and use 'Sign in & Auto-Extract Cookie' to authenticate."
+                }
             }
             code.contains("unsupported") -> {
                 "This video format or URL is not supported by the extraction server."
